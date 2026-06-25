@@ -1,0 +1,14 @@
+[Unit]
+Description=Copy Caddy Certificate for %i to Stalwart
+After=network.target
+# Trigger the reload helper immediately after this finishes successfully
+Wants=stalwart-reload.service
+Before=stalwart-reload.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/cp {{ caddy_certs_dir }}/%i/%i.crt {{ stalwart_certs_dir }}/%i.crt
+ExecStart=/bin/cp {{ caddy_certs_dir }}/%i/%i.key {{ stalwart_certs_dir }}/%i.key
+ExecStart=/bin/chmod 0600 {{ stalwart_certs_dir }}/%i.key
+ExecStart=/bin/chown stalwart:stalwart {{ stalwart_certs_dir }}/%i.crt {{ stalwart_certs_dir }}/%i.key
+

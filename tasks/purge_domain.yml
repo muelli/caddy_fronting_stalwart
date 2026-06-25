@@ -1,0 +1,44 @@
+---
+- name: Execute cascading domain deletion pipeline
+  vars:
+    # We safely evaluate the domain ID right here at the task root level
+    matching_line: "{{ (current_domains.stdout_lines | select('search', domain_item.name) | first) | default('') }}"
+    domain_id: "{{ matching_line.split() | first | default('') }}"
+  block:
+    - name: "Attempt to delete Domain: {{ domain_item.name }}"
+      command:
+        argv: "{{ stalwart_cli_base_parsed + ['delete', 'Domain', '--ids', domain_id] }}"
+      environment:
+        STALWART_TOKEN: "{{ stalwart_api_token | default('') }}"
+      register: delete_attempt
+      failed_when:
+        - delete_attempt.rc != 0
+        - "'objectIsLinked' not in delete_attempt.stdout"
+      changed_when: delete_attempt.rc == 0
+      when: domain_id | length > 0
+
+    - name: "Purge blocking dependencies dynamically for: {{ domain_item.name }}"
+      vars:
+        linked_line: "{{ (delete_attempt.stdout_lines | select('search', 'Linked by:') | first) | default('') }}"
+        blocker_tokens: "{{ linked_line.split('Linked by:') | last | replace(' ', '') | split(',') if linked_line else [] }}"
+      command:
+        argv: "{{ stalwart_cli_base_parsed + ['delete', blocker.split('#')[0], '--ids', blocker.split('#')[1]] }}"
+      environment:
+        STALWART_TOKEN: "{{ stalwart_api_token | default('') }}"
+      loop: "{{ blocker_tokens }}"
+      loop_control:
+        loop_var: blocker
+      when: 
+        - domain_id | length > 0
+        - delete_attempt.rc != 0
+        - blocker_tokens | length > 0
+
+    - name: "Retry Domain deletion with cleared runway: {{ domain_item.name }}"
+      command:
+        argv: "{{ stalwart_cli_base_parsed + ['delete', 'Domain', '--ids', domain_id] }}"
+      environment:
+        STALWART_TOKEN: "{{ stalwart_api_token | default('') }}"
+      when: 
+        - domain_id | length > 0
+        - delete_attempt.rc != 0
+        

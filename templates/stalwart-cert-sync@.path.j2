@@ -1,0 +1,8 @@
+[Unit]
+Description=Watch Caddy TLS certificate renewal for %i
+
+[Path]
+PathChanged={{ caddy_certs_dir }}/%i/%i.crt
+
+[Install]
+WantedBy=multi-user.target

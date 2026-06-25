@@ -1,0 +1,18 @@
+{{ item.name }} {
+    tls {
+        {% set credentials = dns_key_map[item.dns] | default('') %}
+        {% if credentials is mapping %}
+        dns {{ item.dns }} {
+            {% for key in credentials.keys() %}
+            {{ key }} {env.{{ item.dns | upper }}_{{ key | upper }}}
+            {% endfor %}
+        }
+        {% else %}
+        dns {{ item.dns }} {env.{{ item.dns | upper }}_API_KEY}
+        {% endif %}
+    }
+
+    {% for directive in item.caddy_directives | default([]) %}
+    {{ directive }}
+    {% endfor %}
+}
