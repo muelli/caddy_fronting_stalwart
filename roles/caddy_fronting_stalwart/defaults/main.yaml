@@ -1,0 +1,61 @@
+---
+# Default configurations for the orchestration engine
+caddy_conf_dir: "/etc/caddy/conf.d"
+stalwart_certs_dir: "/etc/stalwart/certs"
+caddy_certs_dir: "/var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory"
+
+# Lists fall back to empty to prevent execution crashes if omitted
+stalwart_domains: []
+caddy_domains: []
+
+
+acme_directory_url: "https://acme-staging-v02.api.letsencrypt.org/directory"
+
+
+# Base parsing mapping
+stalwart_cli_base_parsed: "{{ stalwart_cli_base }}"
+
+
+# --- Storage Engine Core ---
+caddy_storage_base: "/var/lib/caddy/.local/share/caddy/certificates"
+
+# Automatically extract the dynamic domain folder slug from the URL string
+acme_host_slug: "{{ acme_directory_url | regex_replace('^https?://', '') | regex_replace('/.*$', '') }}-directory"
+
+# The final computed directory path used by your bootstrap loops
+caddy_certs_dir: "{{ caddy_storage_base }}/{{ acme_host_slug }}"
+stalwart_certs_dir: "/etc/stalwart/certs"
+
+
+# Core connection parameters
+# Where the CLI should connect (always passes through Caddy)
+# Dynamically fall back to the first 'present' domain in your stalwart list
+stalwart_api_url: >-
+  https://{{ (stalwart_domains | selectattr('state', 'equalto', 'present') | map(attribute='name') | first) }}/
+
+# Target directories and routing configurations
+caddy_conf_dir: "/etc/caddy/conf.d"
+
+# The backend port Caddy forwards traffic to
+stalwart_http_proxyv2_listener: "127.0.0.1:8008"
+
+# The Single Source of Truth for the binary execution array
+stalwart_cli_base: >-
+  [
+  "{{ stalwart_cli_path | default('stalwart-cli') }}",
+  "--url", "{{ stalwart_api_url }}",
+  "--insecure",
+  {% if stalwart_api_token is not defined or not stalwart_api_token %}
+  "--user", "{{ stalwart_admin_user }}",
+  "--password", "{{ stalwart_admin_password }}",
+  {% endif %}
+  ]
+
+
+
+## Custom systemd Service Overrides for Caddy, only for the /usr/local/ path
+#caddy_service_override_lines: |
+#  ExecStart=
+#  ExecStart=/usr/local/bin/caddy run --environ --config /etc/caddy/Caddyfile
+#  ExecReload=
+#  ExecReload=/usr/local/bin/caddy reload  --config /etc/caddy/Caddyfile

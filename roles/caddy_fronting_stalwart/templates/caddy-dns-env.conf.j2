@@ -6,18 +6,20 @@
 
 # Dynamic DNS API Keys
 {% set unique_providers = [] %}
-{% for domain in mail_domains if domain.state == 'present' %}
+{% for domain in (stalwart_domains + caddy_domains) if domain.state == 'present' %}
   {% if domain.dns not in unique_providers %}
     {% set _ = unique_providers.append(domain.dns) %}
-    {% set credentials = dns_key_map[domain.dns] %}
-    {% if credentials is mapping %}
-      {# Multi-key provider (like Spaceship) #}
-      {% for key, value in credentials.items() %}
+    {% set credentials = dns_key_map[domain.dns] | default('') %}
+    {% if credentials %}
+      {% if credentials is mapping %}
+        {# Multi-key provider (like Spaceship) #}
+        {% for key, value in credentials.items() %}
 Environment="{{ domain.dns | upper }}_{{ key | upper }}={{ value }}"
-      {% endfor %}
-    {% else %}
-      {# Single-key provider (like Hetzner) #}
+        {% endfor %}
+      {% else %}
+        {# Single-key provider (like Hetzner) #}
 Environment="{{ domain.dns | upper }}_API_KEY={{ credentials }}"
+      {% endif %}
     {% endif %}
   {% endif %}
 {% endfor %}
