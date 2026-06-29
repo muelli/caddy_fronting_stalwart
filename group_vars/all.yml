@@ -42,7 +42,8 @@ caddy_domains:
 
 
 dns_key_map:
-  hetzner: "FOOBAR"
+  hetzner:
+    api_token: "FOOBAR"
   spaceship:
     api_key: "BAZ"
     api_secret: "QUUX"
