@@ -7,7 +7,7 @@
   block:
     - name: "Attempt to delete Domain: {{ domain_item.name }}"
       command:
-        argv: "{{ stalwart_cli_base_parsed + ['delete', 'Domain', '--ids', domain_id] }}"
+        argv: "{{ stalwart_cli_base + ['delete', 'Domain', '--ids', domain_id] }}"
       environment:
         STALWART_TOKEN: "{{ stalwart_api_token | default('') }}"
       register: delete_attempt
@@ -22,7 +22,7 @@
         linked_line: "{{ (delete_attempt.stdout_lines | select('search', 'Linked by:') | first) | default('') }}"
         blocker_tokens: "{{ linked_line.split('Linked by:') | last | replace(' ', '') | split(',') if linked_line else [] }}"
       command:
-        argv: "{{ stalwart_cli_base_parsed + ['delete', blocker.split('#')[0], '--ids', blocker.split('#')[1]] }}"
+        argv: "{{ stalwart_cli_base + ['delete', blocker.split('#')[0], '--ids', blocker.split('#')[1]] }}"
       environment:
         STALWART_TOKEN: "{{ stalwart_api_token | default('') }}"
       loop: "{{ blocker_tokens }}"
@@ -35,7 +35,7 @@
 
     - name: "Retry Domain deletion with cleared runway: {{ domain_item.name }}"
       command:
-        argv: "{{ stalwart_cli_base_parsed + ['delete', 'Domain', '--ids', domain_id] }}"
+        argv: "{{ stalwart_cli_base + ['delete', 'Domain', '--ids', domain_id] }}"
       environment:
         STALWART_TOKEN: "{{ stalwart_api_token | default('') }}"
       when: 

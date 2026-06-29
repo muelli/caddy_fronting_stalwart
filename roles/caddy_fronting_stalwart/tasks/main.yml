@@ -155,7 +155,7 @@
   command:
     argv: >-
       {{
-        stalwart_cli_base_parsed + [
+        stalwart_cli_base + [
           'create', 'Domain',
           '--field', 'name=' + item.name,
           '--field', 'certificateManagement={"@type":"Manual"}'
@@ -173,7 +173,7 @@
 
 - name: Get list of active certificate mappings from Stalwart
   command:
-    argv: "{{ stalwart_cli_base_parsed + ['query', 'Certificate'] }}"
+    argv: "{{ stalwart_cli_base + ['query', 'Certificate'] }}"
   environment:
     STALWART_TOKEN: "{{ stalwart_api_token | default('') }}"
   register: current_stalwart_certs
@@ -184,7 +184,7 @@
   command:
     argv: >-
       {{
-        stalwart_cli_base_parsed + [
+        stalwart_cli_base + [
           'create', 'Certificate',
           '--field', 'certificate={"@type":"File","filePath":"' + stalwart_certs_dir + '/' + item.name + '.crt"}',
           '--field', 'privateKey={"@type":"File","filePath":"' + stalwart_certs_dir + '/' + item.name + '.key"}'
@@ -206,7 +206,7 @@
 # --- STEP 1: QUERY EXISTING DNS SERVERS ---
 - name: Get list of existing DNS Servers from Stalwart
   command:
-    argv: "{{ stalwart_cli_base_parsed + ['query', 'DnsServer'] }}"
+    argv: "{{ stalwart_cli_base + ['query', 'DnsServer'] }}"
   environment:
     STALWART_TOKEN: "{{ stalwart_api_token | default('') }}"
   register: current_dns_servers
@@ -242,7 +242,7 @@
       {%- endfor -%}
       {{ args_list }}
   command:
-    argv: "{{ stalwart_cli_base_parsed + base_args + (dynamic_fields | from_yaml) }}"
+    argv: "{{ stalwart_cli_base + base_args + (dynamic_fields | from_yaml) }}"
   environment:
     STALWART_TOKEN: "{{ stalwart_api_token | default('') }}"
   loop: "{{ stalwart_domains | selectattr('state', 'equalto', 'present') | map(attribute='dns') | unique | list }}"
@@ -255,7 +255,7 @@
 # --- STEP 3: RE-QUERY TO CAPTURE DYNAMIC IDs ---
 - name: Refresh DNS Server list to capture newly generated IDs
   command:
-    argv: "{{ stalwart_cli_base_parsed + ['query', 'DnsServer'] }}"
+    argv: "{{ stalwart_cli_base + ['query', 'DnsServer'] }}"
   environment:
     STALWART_TOKEN: "{{ stalwart_api_token | default('') }}"
   register: updated_dns_servers
@@ -263,7 +263,7 @@
 
 - name: Query existing Stalwart domain internal IDs
   command:
-    argv: "{{ stalwart_cli_base_parsed + ['query', 'Domain'] }}"
+    argv: "{{ stalwart_cli_base + ['query', 'Domain'] }}"
   environment:
     STALWART_TOKEN: "{{ stalwart_api_token | default('') }}"
   register: current_stalwart_domains
@@ -283,7 +283,7 @@
   command:
     argv: >-
       {{
-        stalwart_cli_base_parsed + [
+        stalwart_cli_base + [
           'update', 'Domain', resolved_domain_id,
           '--field', 'dnsManagement={"@type":"Automatic","dnsServerId":"' + resolved_dns_id + '"}'
         ]
