@@ -114,22 +114,26 @@ caddy_certs_dir: "{{ caddy_storage_base }}/{{ acme_host_slug }}"
 stalwart_certs_dir: "/etc/stalwart/certs"
 caddy_conf_dir: "/etc/caddy/conf.d"
 
+
+# Toggle this to false if you are using a fully trusted certificate chain for the CLI connection
+stalwart_cli_insecure: true
+
 # --- Dynamic Core Evaluation Engines ---
 stalwart_api_url: >-
   https://{{ (stalwart_domains | selectattr('state', 'equalto', 'present') | map(attribute='name') | first) | default('127.0.0.1') }}/
 
+# The Single Source of Truth for the binary execution array
 stalwart_cli_base: >-
   {{
-    [
-      stalwart_cli_path,
-      '--url', stalwart_api_url,
-      '--insecure'
-    ] + (
+    [stalwart_cli_path, '--url', stalwart_api_url] +
+    (['--insecure'] if (stalwart_cli_insecure | bool) else []) +
+    (
       ['--user', stalwart_admin_user, '--password', stalwart_admin_password]
       if (stalwart_api_token is not defined or not stalwart_api_token or stalwart_api_token | length == 0)
       else []
     )
   }}
+
 
 # --- Example Custom systemd Service Overrides for Caddy ---
 # Commented out so it remains an empty list option unless declared explicitly
