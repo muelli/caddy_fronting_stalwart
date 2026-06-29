@@ -3,6 +3,8 @@
 # (Leave empty so your real inventory overrides them cleanly)
 caddy_domains: []
 stalwart_domains: []
+
+# Look at stalwart_dns_field_meta and caddy_dns_field_map for the names of the keys
 dns_key_map: {}
 
 # --- Reference Configuration Examples (Commented Out) ---

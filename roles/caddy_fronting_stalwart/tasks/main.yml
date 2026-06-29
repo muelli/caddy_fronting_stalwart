@@ -212,6 +212,32 @@
   register: current_dns_servers
   changed_when: false
 
+# --- STEP 1.5: DYNAMIC VALIDATION GUARDRAIL ---
+- name: Validate inventory keys against Stalwart metadata requirements
+  vars:
+    field_meta: "{{ stalwart_dns_field_meta[item] | default({}) }}"
+    caddy_creds: "{{ dns_key_map[item] | default({}) }}"
+    # Identify which metadata keys are completely missing from the user's inventory map
+    missing_keys: >-
+      {%- set missing = [] -%}
+      {%- for expected_key in field_meta.keys() -%}
+        {%- if expected_key not in caddy_creds -%}
+          {%- set _ = missing.append(expected_key) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ missing }}
+  assert:
+    that:
+      - (missing_keys | from_yaml | length) == 0
+    fail_msg: |
+      CRITICAL SCHEMA MISMATCH: The DNS credentials for provider '{{ item }}' are missing required parameters.
+      Expected keys (from metadata): {{ field_meta.keys() | list }}
+      Missing keys from your inventory: {{ missing_keys | from_yaml }}
+      Currently defined keys in inventory: {{ caddy_creds.keys() | list if caddy_creds else 'None' }}
+  loop: "{{ stalwart_domains | selectattr('state', 'equalto', 'present') | map(attribute='dns') | unique | list }}"
+  when: 
+    - stalwart_dns_field_meta[item] is defined
+
 # --- STEP 2: PROVISION UNIQUE PROVIDERS ---
 - name: Provision unique DNS Providers into Stalwart
   vars:
@@ -227,9 +253,9 @@
       - 'description={{ item | capitalize }}'
     dynamic_fields: >-
       {%- set args_list = [] -%}
-      {%- for caddy_key, val in caddy_creds.items() -%}
-        {%- set meta = field_meta[caddy_key] | default({}) -%}
-        {%- if meta | length > 0 -%}
+      {%- for meta_key, meta in field_meta.items() -%}
+        {%- set val = caddy_creds[meta_key] | default('') -%}
+        {%- if val | length > 0 -%}
           {%- if meta.type == 'SecretKey' -%}
             {%- set secret_value = {'@type': 'Value', 'secret': val} | to_json -%}
             {%- set _ = args_list.append('--field') -%}
