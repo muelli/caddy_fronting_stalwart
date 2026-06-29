@@ -145,3 +145,7 @@ caddy_service_override_lines: []
 #   ExecStart=/usr/local/bin/caddy run --environ --config /etc/caddy/Caddyfile
 #   ExecReload=
 #   ExecReload=/usr/local/bin/caddy reload --config /etc/caddy/Caddyfile
+
+# --- System User and Group Configuration ---
+stalwart_user: "stalwart"
+stalwart_group: "stalwart"

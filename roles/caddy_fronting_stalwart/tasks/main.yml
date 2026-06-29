@@ -42,8 +42,8 @@
   file:
     path: "{{ stalwart_certs_dir }}"
     state: directory
-    owner: stalwart
-    group: stalwart
+    owner: "{{ stalwart_user }}"
+    group: "{{ stalwart_group }}"
     mode: '0750'
 
 # --- INCLUDE-BASED CADDY SITES DEPLOYMENT ---

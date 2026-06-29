@@ -10,5 +10,4 @@ Type=oneshot
 ExecStart=/bin/cp {{ caddy_certs_dir }}/%i/%i.crt {{ stalwart_certs_dir }}/%i.crt
 ExecStart=/bin/cp {{ caddy_certs_dir }}/%i/%i.key {{ stalwart_certs_dir }}/%i.key
 ExecStart=/bin/chmod 0600 {{ stalwart_certs_dir }}/%i.key
-ExecStart=/bin/chown stalwart:stalwart {{ stalwart_certs_dir }}/%i.crt {{ stalwart_certs_dir }}/%i.key
-
+ExecStart=/bin/chown {{ stalwart_user }}:{{ stalwart_group }} {{ stalwart_certs_dir }}/%i.crt {{ stalwart_certs_dir }}/%i.key
