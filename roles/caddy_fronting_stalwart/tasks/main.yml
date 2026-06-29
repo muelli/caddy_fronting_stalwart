@@ -203,6 +203,113 @@
 
 
 
+# --- STEP 1: QUERY EXISTING DNS SERVERS ---
+- name: Get list of existing DNS Servers from Stalwart
+  command:
+    argv: "{{ stalwart_cli_base_parsed + ['query', 'DnsServer'] }}"
+  environment:
+    STALWART_TOKEN: "{{ stalwart_api_token | default('') }}"
+  register: current_dns_servers
+  changed_when: false
+
+# --- STEP 2: PROVISION UNIQUE PROVIDERS ---
+# --- AUTOMATIC DNS PROVIDER MANAGEMENT ---
+- name: Provision unique DNS Providers into Stalwart
+  vars:
+    provider_type: "{{ stalwart_dns_provider_map[item] | default('') }}"
+    caddy_creds: "{{ dns_key_map[item] | default({}) }}"
+    field_meta: "{{ stalwart_dns_field_meta[item] | default({}) }}"
+    
+    # 1. Build the base mandatory command parameters
+    base_args:
+      - 'create'
+      - 'DnsServer'
+      - '--field'
+      - '@type={{ provider_type }}'
+      - '--field'
+      - 'description={{ item | capitalize }}'
+      
+    # 2. Dynamically build a list of '--field' 'key=value' arguments based on the schema requirements
+    dynamic_fields: >-
+      {%- set args_list = [] -%}
+      {%- for caddy_key, val in caddy_creds.items() -%}
+        {%- set meta = field_meta[caddy_key] | default({}) -%}
+        {%- if meta | length > 0 -%}
+          {%- if meta.type == 'SecretKey' -%}
+            {%- set secret_value = {'@type': 'Value', 'secret': val} | to_json -%}
+            {%- set _ = args_list.append('--field') -%}
+            {%- set _ = args_list.append(meta.name + '=' + secret_value) -%}
+          {%- else -%}
+            {%- set _ = args_list.append('--field') -%}
+            {%- set _ = args_list.append(meta.name + '=' + val) -%}
+          {%- endif -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ args_list }}
+  command:
+    argv: "{{ stalwart_cli_base_parsed + base_args + (dynamic_fields | from_yaml) }}"
+  environment:
+    STALWART_TOKEN: "{{ stalwart_api_token | default('') }}"
+  loop: "{{ stalwart_domains | selectattr('state', 'equalto', 'present') | map(attribute='dns') | unique | list }}"
+  when: 
+    - provider_type | length > 0
+    - caddy_creds.keys() | list | length > 0
+    - current_dns_servers.stdout is defined
+    - provider_type not in current_dns_servers.stdout
+
+
+
+
+
+# --- STEP 3: RE-QUERY TO CAPTURE DYNAMIC IDs ---
+- name: Refresh DNS Server list to capture newly generated IDs
+  command:
+    argv: "{{ stalwart_cli_base_parsed + ['query', 'DnsServer'] }}"
+  environment:
+    STALWART_TOKEN: "{{ stalwart_api_token | default('') }}"
+  register: updated_dns_servers
+  changed_when: false
+
+- name: Query existing Stalwart domain internal IDs
+  command:
+    argv: "{{ stalwart_cli_base_parsed + ['query', 'Domain'] }}"
+  environment:
+    STALWART_TOKEN: "{{ stalwart_api_token | default('') }}"
+  register: current_stalwart_domains
+  changed_when: false
+
+# --- STEP 4: LINK DOMAINS TO THE SHARED PROVIDERS ---
+# --- STEP 4: LINK DOMAINS TO THE SHARED PROVIDERS ---
+- name: Link Automatic DNS Management to existing Stalwart Domains
+  vars:
+    # 1. Filter out headers, then find the domain row to capture its short ID
+    clean_domain_lines: "{{ current_stalwart_domains.stdout_lines | reject('search', 'Subject Alternative Names') | reject('search', 'Id') | list }}"
+    matching_domain_line: "{{ (clean_domain_lines | select('search', item.name) | first) | default('') }}"
+    resolved_domain_id: "{{ matching_domain_line.split() | first | default('') }}"
+    
+    # 2. Filter out headers, then find the DnsServer row to capture its true short ID
+    target_provider: "{{ stalwart_dns_provider_map[item.dns] | default('') }}"
+    clean_dns_lines: "{{ updated_dns_servers.stdout_lines | reject('search', 'DNS server type') | reject('search', 'Id') | list }}"
+    matching_dns_line: "{{ (clean_dns_lines | select('search', target_provider) | first) | default('') }}"
+    resolved_dns_id: "{{ matching_dns_line.split() | first | default('') }}"
+  command:
+    argv: >-
+      {{
+        stalwart_cli_base_parsed + [
+          'update', 'Domain', resolved_domain_id,
+          '--field', 'dnsManagement={"@type":"Automatic","dnsServerId":"' + resolved_dns_id + '"}'
+        ]
+      }}
+  environment:
+    STALWART_TOKEN: "{{ stalwart_api_token | default('') }}"
+  loop: "{{ stalwart_domains }}"
+  when:
+    - item.state == 'present'
+    - resolved_domain_id | length > 0
+    - resolved_dns_id | length > 0
+
+
+
 # --- CLEANUP (ABSENT) PIPELINE ---
 - name: Get current domains from Stalwart to find target IDs
   command:
