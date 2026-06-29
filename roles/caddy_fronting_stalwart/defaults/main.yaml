@@ -5,7 +5,29 @@ stalwart_certs_dir: "/etc/stalwart/certs"
 caddy_certs_dir: "/var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory"
 
 # Lists fall back to empty to prevent execution crashes if omitted
+
+
+stalwart_domains:
+  - name: "foo.site"
+    state: present
+    dns: gandi                   # Used for both Caddy and Stalwart provider lookups
+    caddy_directive: |
+       handle /foo {
+         reverse_proxy 127.0.0.1:3000
+       }
+
+  - name: "domain.online"
+    state: present
+    dns: spaceship
+       handle /bar {
+         respond "you need to change this" 200
+       }
+
+
 stalwart_domains: []
+
+
+
 caddy_domains: []
 
 
@@ -52,10 +74,64 @@ stalwart_cli_base: >-
   ]
 
 
-
 ## Custom systemd Service Overrides for Caddy, only for the /usr/local/ path
 #caddy_service_override_lines: |
 #  ExecStart=
 #  ExecStart=/usr/local/bin/caddy run --environ --config /etc/caddy/Caddyfile
 #  ExecReload=
 #  ExecReload=/usr/local/bin/caddy reload  --config /etc/caddy/Caddyfile
+
+
+# Mapping Caddy provider names to Stalwart's variant @types
+stalwart_dns_provider_map:
+  gandi: "GandiV5"
+  dnsimple: "Dnsimple"
+
+# Flat credential store for Caddyfile loops
+dns_key_map:
+  gandi:
+    api_token: "gandi_token_abcdef12345"
+  dnsimple:
+    auth_token: "dnsimple_token_xyz789"
+    account_id: "123456"
+
+# Universal Translation Map for Stalwart
+stalwart_dns_field_meta:
+  gandi:
+    api_token: { name: "secret", type: "SecretKey" }
+  dnsimple:
+    auth_token: { name: "authToken", type: "SecretKey" }
+    account_id: { name: "accountIdentifier", type: "String" }
+
+
+# Flat credential store for Caddyfile loops and Systemd env generation
+dns_key_map:
+  gandi:
+    bearer_token: "gandi_token_abcdef12345"
+  hetzner:
+    api_token: "hetzner_token_789012"
+  spaceship:
+    apikey: "spaceship_api_key_xyz987"
+    apisecret: "spaceship_secret_token_foo567"
+  ovh:
+    application_key: "ovh_app_key_123"
+    application_secret: "ovh_app_secret_456"
+    consumer_key: "ovh_consumer_key_789"
+
+# Explicit Caddyfile structural layouts and internal directive names
+caddy_dns_field_map:
+  gandi:
+    layout: "anonymous"
+  hetzner:
+    layout: "anonymous"
+  spaceship:
+    layout: "block"
+    fields:
+      apikey: "api_key"
+      apisecret: "api_secret"
+  ovh:
+    layout: "block"
+    fields:
+      application_key: "application_key"
+      application_secret: "application_secret"
+      consumer_key: "consumer_key"
