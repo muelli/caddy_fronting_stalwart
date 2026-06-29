@@ -1,20 +1,16 @@
+{% import 'macros.j2' as macros with context %}
 {{ item.name }} {
-    tls {
-        {% set credentials = dns_key_map[item.dns] | default('') %}
-        {% if credentials is mapping %}
-        dns {{ item.dns }} {
-            {% for key in credentials.keys() %}
-            {{ key }} {env.{{ item.dns | upper }}_{{ key | upper }}}
-            {% endfor %}
-        }
-        {% else %}
-        dns {{ item.dns }} {env.{{ item.dns | upper }}_API_KEY}
-        {% endif %}
+
+    handle {
+	    reverse_proxy {{ stalwart_http_proxyv2_listener }} {
+	        transport http {
+	            proxy_protocol v2
+	        }
+	    }
     }
 
-    reverse_proxy {{ stalwart_http_proxyv2_listener }} {
-        transport http {
-            proxy_protocol v2
-        }
+    tls {
+        {{ macros.render_caddy_dns(item.dns, dns_key_map, caddy_dns_field_map) | indent(8) }}
+        #propagation_delay 30s
     }
 }
