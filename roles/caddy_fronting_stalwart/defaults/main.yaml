@@ -1,41 +1,143 @@
 ---
-# Default configurations for the orchestration engine
-caddy_conf_dir: "/etc/caddy/conf.d"
-stalwart_certs_dir: "/etc/stalwart/certs"
-caddy_certs_dir: "/var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory"
+stalwart_api_token: "API_FOOBAR"
 
-# Lists fall back to empty to prevent execution crashes if omitted
-
+stalwart_cli_path: "stalwart-cli"
 
 stalwart_domains:
-  - name: "foo.site"
-    state: present
-    dns: gandi                   # Used for both Caddy and Stalwart provider lookups
+  - name: "domain.site"
+    state: "present"
+    dns: "hetzner"
     caddy_directive: |
        handle /foo {
-         reverse_proxy 127.0.0.1:3000
+         respond "Hello" 200
+       }
+       handle /bar/* {
+         respond "Hello Bar" 200
        }
 
   - name: "domain.online"
-    state: present
-    dns: spaceship
-       handle /bar {
-         respond "you need to change this" 200
-       }
+    state: "present"
+    dns: "spaceship"
 
 
-stalwart_domains: []
+caddy_domains:
+  - name: "app.domain.site"
+    state: "present"
+    dns: "hetzner"
+    caddy_directive: |
+      respond "Hello World" 200
+
+  - name: "webmail.domain.site"
+    state: "present"
+    dns: "hetzner"
+    caddy_directive: |
+      handle {
+        reverse_proxy 127.0.0.1:3000
+      }
+
+  - name: "nomail.domain.example"
+    state: "absent"
+    dns: "gandi"
 
 
 
-caddy_domains: []
+dns_key_map:
+  gandi:
+    secret: "FOOBAR"
+  hetzner:
+    secret: "BARQUX"
+  spaceship:
+    api_key: "QUUZ"
+    api_secret: "FOOQUUZ"
+  porkbun:
+    apiKey: "porkbun_api_key_111222"
+    secretApiKey: "porkbun_secret_api_key_333444"
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Mapping Caddy provider names to Stalwart's variant @types
+stalwart_dns_provider_map:
+  gandi: "GandiV5"
+  dnsimple: "Dnsimple"
+
+
+# Universal Translation Map for Stalwart
+stalwart_dns_field_meta:
+  gandi:
+    api_token: { name: "secret", type: "SecretKey" }
+  dnsimple:
+    auth_token: { name: "authToken", type: "SecretKey" }
+    account_id: { name: "accountIdentifier", type: "String" }
+
+# Flat credential store for Caddyfile loops and Systemd env generation
+dns_key_map:
+  gandi:
+    bearer_token: "gandi_token_abcdef12345"
+  hetzner:
+    api_token: "hetzner_token_789012"
+  spaceship:
+    apikey: "spaceship_api_key_xyz987"
+    apisecret: "spaceship_secret_token_foo567"
+  ovh:
+    application_key: "ovh_app_key_123"
+    application_secret: "ovh_app_secret_456"
+    consumer_key: "ovh_consumer_key_789"
+
+# Explicit Caddyfile structural layouts and internal directive names
+caddy_dns_field_map:
+  gandi:
+    layout: "anonymous"
+  hetzner:
+    layout: "anonymous"
+  spaceship:
+    layout: "block"
+    fields:
+      apikey: "api_key"
+      apisecret: "api_secret"
+  ovh:
+    layout: "block"
+    fields:
+      application_key: "application_key"
+      application_secret: "application_secret"
+      consumer_key: "consumer_key"
+
+
+
+
+
+
+
+
+
+
+
+
+
+# UI / User Credentials (Kept for manual admin access)
+#stalwart_admin_user: "admin"
+#stalwart_admin_password: "your_secure_bootstrap_password"
+
+# Automation API Token (Used exclusively by Ansible & Systemd)
+
+
+
+# --- ACME Endpoint Config ---
+# You can flip this to any custom CA endpoint string
+# acme_directory_url: "https://acme-v02.api.letsencrypt.org/directory"
 acme_directory_url: "https://acme-staging-v02.api.letsencrypt.org/directory"
 
-
-# Base parsing mapping
-stalwart_cli_base_parsed: "{{ stalwart_cli_base }}"
 
 
 # --- Storage Engine Core ---
@@ -74,64 +176,14 @@ stalwart_cli_base: >-
   ]
 
 
-## Custom systemd Service Overrides for Caddy, only for the /usr/local/ path
+# Default Caddy proxy template string
+caddy_default_reverse_proxy_lines:
+  - "reverse_proxy {{ caddy_reverse_proxy_target }}"
+
+# Custom systemd Service Overrides for Caddy
 #caddy_service_override_lines: |
 #  ExecStart=
 #  ExecStart=/usr/local/bin/caddy run --environ --config /etc/caddy/Caddyfile
 #  ExecReload=
 #  ExecReload=/usr/local/bin/caddy reload  --config /etc/caddy/Caddyfile
-
-
-# Mapping Caddy provider names to Stalwart's variant @types
-stalwart_dns_provider_map:
-  gandi: "GandiV5"
-  dnsimple: "Dnsimple"
-
-# Flat credential store for Caddyfile loops
-dns_key_map:
-  gandi:
-    api_token: "gandi_token_abcdef12345"
-  dnsimple:
-    auth_token: "dnsimple_token_xyz789"
-    account_id: "123456"
-
-# Universal Translation Map for Stalwart
-stalwart_dns_field_meta:
-  gandi:
-    api_token: { name: "secret", type: "SecretKey" }
-  dnsimple:
-    auth_token: { name: "authToken", type: "SecretKey" }
-    account_id: { name: "accountIdentifier", type: "String" }
-
-
-# Flat credential store for Caddyfile loops and Systemd env generation
-dns_key_map:
-  gandi:
-    bearer_token: "gandi_token_abcdef12345"
-  hetzner:
-    api_token: "hetzner_token_789012"
-  spaceship:
-    apikey: "spaceship_api_key_xyz987"
-    apisecret: "spaceship_secret_token_foo567"
-  ovh:
-    application_key: "ovh_app_key_123"
-    application_secret: "ovh_app_secret_456"
-    consumer_key: "ovh_consumer_key_789"
-
-# Explicit Caddyfile structural layouts and internal directive names
-caddy_dns_field_map:
-  gandi:
-    layout: "anonymous"
-  hetzner:
-    layout: "anonymous"
-  spaceship:
-    layout: "block"
-    fields:
-      apikey: "api_key"
-      apisecret: "api_secret"
-  ovh:
-    layout: "block"
-    fields:
-      application_key: "application_key"
-      application_secret: "application_secret"
-      consumer_key: "consumer_key"
+caddy_service_override_lines: []
