@@ -131,8 +131,8 @@
     src: "{{ caddy_certs_dir }}/{{ item.0.name }}/{{ item.0.name }}.{{ 'crt' if item.1 == 'crt' else 'key' }}"
     dest: "{{ stalwart_certs_dir }}/{{ item.0.name }}.{{ item.1 }}"
     remote_src: true
-    owner: stalwart
-    group: stalwart
+    owner: "{{ stalwart_user }}"
+    group: "{{ stalwart_group }}"
     mode: "{{ '0644' if item.1 == 'crt' else '0600' }}"
   # Optimized Loop: Zip the stat results to check if copies are actually needed
   loop: "{{ stalwart_domains | product(['crt', 'key']) | list }}"
