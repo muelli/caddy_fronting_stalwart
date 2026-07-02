@@ -134,7 +134,6 @@
     owner: "{{ stalwart_user }}"
     group: "{{ stalwart_group }}"
     mode: "{{ '0644' if item.1 == 'crt' else '0600' }}"
-  # Optimized Loop: Zip the stat results to check if copies are actually needed
   loop: "{{ stalwart_domains | product(['crt', 'key']) | list }}"
   vars:
     match_stat: "{{ local_cert_stats.results | selectattr('item.name', 'equalto', item.0.name) | first }}"
@@ -149,197 +148,6 @@
     enabled: true
   loop: "{{ stalwart_domains }}"
   when: item.state == 'present'
-
-# --- STALWART RUNTIME ENGINE SYNCHRONIZATION ---
-- name: Create or update domains in Stalwart
-  command:
-    argv: >-
-      {{
-        stalwart_cli_base + [
-          'create', 'Domain',
-          '--field', 'name=' + item.name,
-          '--field', 'certificateManagement={"@type":"Manual"}'
-        ]
-      }}
-  environment:
-    STALWART_TOKEN: "{{ stalwart_api_token | default('') }}"
-  loop: "{{ stalwart_domains }}"
-  when: item.state == 'present'
-  register: domain_create_result
-  failed_when: 
-    - domain_create_result.rc != 0
-    - "'primaryKeyViolation' not in domain_create_result.stderr"
-  changed_when: "'primaryKeyViolation' not in domain_create_result.stderr"
-
-- name: Get list of active certificate mappings from Stalwart
-  command:
-    argv: "{{ stalwart_cli_base + ['query', 'Certificate'] }}"
-  environment:
-    STALWART_TOKEN: "{{ stalwart_api_token | default('') }}"
-  register: current_stalwart_certs
-  changed_when: false
-  when: stalwart_domains | selectattr('state', 'equalto', 'present') | list | length > 0
-
-- name: Link certificates to domains in Stalwart
-  command:
-    argv: >-
-      {{
-        stalwart_cli_base + [
-          'create', 'Certificate',
-          '--field', 'certificate={"@type":"File","filePath":"' + stalwart_certs_dir + '/' + item.name + '.crt"}',
-          '--field', 'privateKey={"@type":"File","filePath":"' + stalwart_certs_dir + '/' + item.name + '.key"}'
-        ]
-      }}
-  environment:
-    STALWART_TOKEN: "{{ stalwart_api_token | default('') }}"
-  loop: "{{ stalwart_domains }}"
-  when: 
-    - item.state == 'present'
-    - current_stalwart_certs.stdout is defined
-    - item.name not in current_stalwart_certs.stdout
-  register: cert_create_result
-  failed_when: 
-    - cert_create_result.rc != 0
-    - "'primaryKeyViolation' not in cert_create_result.stderr"
-  changed_when: "'primaryKeyViolation' not in cert_create_result.stderr"
-
-# --- STEP 1: QUERY EXISTING DNS SERVERS ---
-- name: Get list of existing DNS Servers from Stalwart
-  command:
-    argv: "{{ stalwart_cli_base + ['query', 'DnsServer'] }}"
-  environment:
-    STALWART_TOKEN: "{{ stalwart_api_token | default('') }}"
-  register: current_dns_servers
-  changed_when: false
-
-# --- STEP 1.5: DYNAMIC VALIDATION GUARDRAIL ---
-- name: Validate inventory keys against Stalwart metadata requirements
-  vars:
-    field_meta: "{{ stalwart_dns_field_meta[item] | default({}) }}"
-    caddy_creds: "{{ dns_key_map[item] | default({}) }}"
-    # Identify which metadata keys are completely missing from the user's inventory map
-    missing_keys: >-
-      {%- set missing = [] -%}
-      {%- for expected_key in field_meta.keys() -%}
-        {%- if expected_key not in caddy_creds -%}
-          {%- set _ = missing.append(expected_key) -%}
-        {%- endif -%}
-      {%- endfor -%}
-      {{ missing }}
-  assert:
-    that:
-      - (missing_keys | from_yaml | length) == 0
-    fail_msg: |
-      CRITICAL SCHEMA MISMATCH: The DNS credentials for provider '{{ item }}' are missing required parameters.
-      Expected keys (from metadata): {{ field_meta.keys() | list }}
-      Missing keys from your inventory: {{ missing_keys | from_yaml }}
-      Currently defined keys in inventory: {{ caddy_creds.keys() | list if caddy_creds else 'None' }}
-  loop: "{{ stalwart_domains | selectattr('state', 'equalto', 'present') | map(attribute='dns') | unique | list }}"
-  when: 
-    - stalwart_dns_field_meta[item] is defined
-
-# --- STEP 2: PROVISION UNIQUE PROVIDERS ---
-- name: Provision unique DNS Providers into Stalwart
-  vars:
-    provider_type: "{{ stalwart_dns_provider_map[item] | default('') }}"
-    caddy_creds: "{{ dns_key_map[item] | default({}) }}"
-    field_meta: "{{ stalwart_dns_field_meta[item] | default({}) }}"
-    base_args:
-      - 'create'
-      - 'DnsServer'
-      - '--field'
-      - '@type={{ provider_type }}'
-      - '--field'
-      - 'description={{ item | capitalize }}'
-    dynamic_fields: >-
-      {%- set args_list = [] -%}
-      {%- for meta_key, meta in field_meta.items() -%}
-        {%- set val = caddy_creds[meta_key] | default('') -%}
-        {%- if val | length > 0 -%}
-          {%- if meta.type == 'SecretKey' -%}
-            {%- set secret_value = {'@type': 'Value', 'secret': val} | to_json -%}
-            {%- set _ = args_list.append('--field') -%}
-            {%- set _ = args_list.append(meta.name + '=' + secret_value) -%}
-          {%- else -%}
-            {%- set _ = args_list.append('--field') -%}
-            {%- set _ = args_list.append(meta.name + '=' + val) -%}
-          {%- endif -%}
-        {%- endif -%}
-      {%- endfor -%}
-      {{ args_list }}
-  command:
-    argv: "{{ stalwart_cli_base + base_args + (dynamic_fields | from_yaml) }}"
-  environment:
-    STALWART_TOKEN: "{{ stalwart_api_token | default('') }}"
-  loop: "{{ stalwart_domains | selectattr('state', 'equalto', 'present') | map(attribute='dns') | unique | list }}"
-  when: 
-    - provider_type | length > 0
-    - caddy_creds.keys() | list | length > 0
-    - current_dns_servers.stdout is defined
-    - provider_type not in current_dns_servers.stdout
-
-# --- STEP 3: RE-QUERY TO CAPTURE DYNAMIC IDs ---
-- name: Refresh DNS Server list to capture newly generated IDs
-  command:
-    argv: "{{ stalwart_cli_base + ['query', 'DnsServer'] }}"
-  environment:
-    STALWART_TOKEN: "{{ stalwart_api_token | default('') }}"
-  register: updated_dns_servers
-  changed_when: false
-
-- name: Query existing Stalwart domain internal IDs
-  command:
-    argv: "{{ stalwart_cli_base + ['query', 'Domain'] }}"
-  environment:
-    STALWART_TOKEN: "{{ stalwart_api_token | default('') }}"
-  register: current_stalwart_domains
-  changed_when: false
-
-# --- STEP 4: LINK DOMAINS TO THE SHARED PROVIDERS ---
-- name: Link Automatic DNS Management to existing Stalwart Domains
-  vars:
-    clean_domain_lines: "{{ current_stalwart_domains.stdout_lines | reject('search', 'Subject Alternative Names') | reject('search', 'Id') | list }}"
-    matching_domain_line: "{{ (clean_domain_lines | select('search', item.name) | first) | default('') }}"
-    resolved_domain_id: "{{ matching_domain_line.split() | first | default('') }}"
-    
-    target_provider: "{{ stalwart_dns_provider_map[item.dns] | default('') }}"
-    clean_dns_lines: "{{ updated_dns_servers.stdout_lines | reject('search', 'DNS server type') | reject('search', 'Id') | list }}"
-    matching_dns_line: "{{ (clean_dns_lines | select('search', target_provider) | first) | default('') }}"
-    resolved_dns_id: "{{ matching_dns_line.split() | first | default('') }}"
-  command:
-    argv: >-
-      {{
-        stalwart_cli_base + [
-          'update', 'Domain', resolved_domain_id,
-          '--field', 'dnsManagement={"@type":"Automatic","dnsServerId":"' + resolved_dns_id + '"}'
-        ]
-      }}
-  environment:
-    STALWART_TOKEN: "{{ stalwart_api_token | default('') }}"
-  loop: "{{ stalwart_domains }}"
-  when:
-    - item.state == 'present'
-    - resolved_domain_id | length > 0
-    - resolved_dns_id | length > 0
-
-# --- CLEANUP (ABSENT) PIPELINE ---
-- name: Get current domains from Stalwart to find target IDs
-  command:
-    argv: "{{ stalwart_cli_base + ['query', 'Domain'] }}"
-  environment:
-    STALWART_TOKEN: "{{ stalwart_api_token | default('') }}"
-  register: current_domains
-  changed_when: false
-  when: stalwart_domains | selectattr('state', 'equalto', 'absent') | list | length > 0
-
-- name: Run absent domain lifecycles
-  include_tasks: tasks/purge_domain.yml
-  loop: "{{ stalwart_domains }}"
-  loop_control:
-    loop_var: domain_item
-  when: 
-    - domain_item.state == 'absent'
-    - current_domains.stdout is defined
 
 - name: Stop and disable systemd path monitors for absent domains
   service:
@@ -370,9 +178,8 @@
     {%- endfor -%}
     {{ files }}
 
-
 # ==============================================================================
-# --- STALWART RUNTIME ENGINE SYNCHRONIZATION (PURE DECLARATIVE NAME MATCH) ---
+# --- STALWART RUNTIME ENGINE SYNCHRONIZATION (PURE DECLARATIVE ATOMIC JMAP) ---
 # ==============================================================================
 - name: Compile unified Stalwart declarative blueprint in memory
   set_fact:
@@ -464,14 +271,9 @@
       } | to_json }}
       {% endfor %}
 
-
 - name: Inspect unified Stalwart NDJSON deployment plan
   debug:
     var: stalwart_unified_ndjson
-
-#- name: failing
-#  fail:
-#    msg: "Don't delete my domains!"
 
 - name: Apply declarative Stalwart engine configuration
   command:
