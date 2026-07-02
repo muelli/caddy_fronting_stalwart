@@ -369,3 +369,116 @@
       {%- set _ = files.append(stalwart_certs_dir ~ '/' ~ domain.name ~ '.key') -%}
     {%- endfor -%}
     {{ files }}
+
+
+# ==============================================================================
+# --- STALWART RUNTIME ENGINE SYNCHRONIZATION (PURE DECLARATIVE NAME MATCH) ---
+# ==============================================================================
+- name: Compile unified Stalwart declarative blueprint in memory
+  set_fact:
+    stalwart_unified_ndjson: |-
+      {# --- STAGE 1: DNS PROVIDERS (CENTRALIZED UNIQUE INSULATION) --- #}
+      {% set active_dns_list = [] %}
+      {% for d in stalwart_domains if d.state is defined and d.state == 'present' and d.dns is defined %}
+        {% set _ = active_dns_list.append(d.dns | lower) %}
+      {% endfor %}
+
+      {# Generate single unified shared provider entry blocks natively #}
+      {% set unique_dns = active_dns_list | unique | list %}
+      {% for dns in unique_dns %}
+      {% set provider_type = stalwart_dns_provider_map[dns] | default('') %}
+      {% set caddy_creds = dns_key_map[dns] | default({}) %}
+      {% if provider_type and caddy_creds.keys() | list | length > 0 %}
+      {% set dns_fields = {"@type": provider_type, "description": dns | capitalize, "timeout": 30000} %}
+      {% for key, val in caddy_creds.items() %}
+        {% set provider_meta = stalwart_dns_field_meta[dns] | default({}) %}
+        {% set field_rule = provider_meta[key] | default({}) %}
+        {% set stalwart_key = field_rule.name | default(key) %}
+        {% set stalwart_type = field_rule.type | default('String') %}
+        {% if stalwart_type == 'SecretKey' %}
+          {% set _ = dns_fields.update({stalwart_key: {"@type": "Value", "secret": val}}) %}
+        {% else %}
+          {% set _ = dns_fields.update({stalwart_key: val}) %}
+        {% endif %}
+      {% endfor %}
+      {{ {"@type": "upsert", "object": "DnsServer", "matchOn": ["description"], "value": { "dns-" ~ (dns | lower): dns_fields }} | to_json }}
+      {% endif %}
+      {% endfor %}
+
+      {# --- STAGE 2: CERTIFICATES --- #}
+      {% set absent_certs = stalwart_domains | selectattr('state', 'defined') | selectattr('state', 'equalto', 'absent') | list %}
+      {% if absent_certs | length > 0 %}
+      {% for domain in absent_certs %}
+      {{ {"@type": "destroy", "object": "Certificate", "ids": ["certificate-" ~ (domain.name | replace('.', '-'))]} | to_json }}
+      {% endfor %}
+      {% endif %}
+      {% for domain in stalwart_domains if domain.state is defined and domain.state == 'present' %}
+      {% set cert_slug = "certificate-" ~ (domain.name | replace('.', '-')) %}
+      {% set san_map = {} %}
+      {% set _ = san_map.update({domain.name: true}) %}
+      {{ {
+        "@type": "upsert",
+        "object": "Certificate",
+        "matchOn": ["subjectAlternativeNames"],
+        "value": {
+          cert_slug: {
+            "certificate": {
+              "@type": "File",
+              "filePath": stalwart_certs_dir ~ "/" ~ domain.name ~ ".crt"
+            },
+            "privateKey": {
+              "@type": "File",
+              "filePath": stalwart_certs_dir ~ "/" ~ domain.name ~ ".key"
+            },
+            "subjectAlternativeNames": san_map
+          }
+        }
+      } | to_json }}
+      {% endfor %}
+
+      {# --- STAGE 3: DOMAINS --- #}
+      {% for domain in stalwart_domains if domain.state is defined and domain.state == 'absent' %}
+      {{ {"@type": "destroy", "object": "Domain", "value": { "name": domain.name }} | to_json }}
+      {% endfor %}
+      {% for domain in stalwart_domains if domain.state is defined and domain.state == 'present' %}
+      {% set cert_slug = "certificate-" ~ (domain.name | replace('.', '-')) %}
+      {% set batch_dns_id = "\x23dns-" ~ (domain.dns | lower if domain.dns is defined else '') %}
+      {% set batch_cert_id = "\x23" ~ cert_slug %}
+      {{ {
+        "@type": "upsert",
+        "object": "Domain",
+        "matchOn": ["name"],
+        "value": {
+          "domain-" ~ (domain.name | replace('.', '-')): {
+            "name": domain.name,
+            "certificateManagement": {
+              "@type": "Manual",
+              "certificateId": batch_cert_id
+            },
+            "dnsManagement": {
+              "@type": "Automatic",
+              "dnsServerId": batch_dns_id
+            }
+          }
+        }
+      } | to_json }}
+      {% endfor %}
+
+
+- name: Inspect unified Stalwart NDJSON deployment plan
+  debug:
+    var: stalwart_unified_ndjson
+
+#- name: failing
+#  fail:
+#    msg: "Don't delete my domains!"
+
+- name: Apply declarative Stalwart engine configuration
+  command:
+    argv: "{{ stalwart_cli_base + ['apply', '--stdin'] }}"
+    stdin: "{{ stalwart_unified_ndjson }}"
+  environment:
+    STALWART_TOKEN: "{{ stalwart_api_token | default('') }}"
+  register: stalwart_sync_result
+  changed_when: 
+    - "'\"created\":1' in stalwart_sync_result.stdout or '\"updated\":1' in stalwart_sync_result.stdout or '\"destroyed\":1' in stalwart_sync_result.stdout"
