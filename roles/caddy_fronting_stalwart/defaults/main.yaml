@@ -60,6 +60,34 @@ stalwart_api_token: "API_foobar"
 stalwart_cli_path: "stalwart-cli"
 stalwart_http_proxyv2_listener: "127.0.0.1:8008"
 
+
+stalwart_relay_hosts:
+  - name: "examplerelay"
+    state: "present"
+    address: "127.1"
+    port: 25
+    protocol: "smtp"
+    auth_username: "FOO"
+    auth_secret: "your_secure_relay_token"
+    implicit_tls: true
+    allow_invalid_certs: false
+    description: "Primary outbound relay host"
+
+  - name: "nonexistent"
+    state: "absent"
+
+
+sender_domain_routing:
+  - domain: bar.example
+    route: examplerelay
+    state: present
+
+  - domain: foo.example
+    route: nonexistent
+    state: absent
+
+
+
 # --- Metadata Maps for Caddy and Stalwart Frameworks ---
 stalwart_dns_provider_map:
   gandi: "GandiV5"

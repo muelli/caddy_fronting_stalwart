@@ -6,6 +6,24 @@
   loop: "{{ stalwart_domains }}"
   when: item.state not in ['present', 'absent']
 
+- name: Prevent SPF validation failure from clashing automatic DNS and external relays
+  vars:
+    # Erstelle eine flache Liste aller Domains, die über ein externes Relay senden
+    relayed_domains: "{{ sender_domain_routing | default([]) | map(attribute='domain') | list }}"
+  fail:
+    msg: >-
+      CRITICAL VALIDATION CONFLATION: Domain '{{ item.name }}' is configured to use an external outbound relay via 'sender_domain_routing', 
+      but it also has automatic DNS management ('dns: {{ item.dns }}') enabled. 
+      This will cause Stalwart to overwrite SPF records with its own local IP, breaking outbound mail validation.
+      Fix: Remove the 'dns' key from '{{ item.name }}' in your inventory and manage its DNS records manually to include your relay host.
+  loop: "{{ stalwart_domains }}"
+  when:
+    - item.state | default('present', true) == 'present'
+    - item.dns is defined
+    - item.name in relayed_domains
+
+
+
 # --- DIRECTORY & ENVIRONMENT PREPARATION ---
 - name: Ensure Caddy configuration layout directories exist
   file:
@@ -184,13 +202,42 @@
 - name: Compile unified Stalwart declarative blueprint in memory
   set_fact:
     stalwart_unified_ndjson: |-
+      {# --- STAGE 0: MTA ROUTES (TEARDOWN AWARE) --- #}
+      {% if stalwart_relay_hosts is defined %}
+      {# 1. Teardown absent routes #}
+      {% for route in stalwart_relay_hosts if route.state | default("present", true) == 'absent' %}
+      {{ {"@type": "destroy", "object": "MtaRoute", "value": {"name": route.name}} | to_json }}
+      {% endfor %}
+      
+      {# 2. Upsert present routes #}
+      {% for route in stalwart_relay_hosts if route.state | default("present", true) == 'present' %}
+      {% set route_fields = {
+        "@type": "Relay",
+        "name": route.name,
+        "address": route.address,
+        "port": route.port | default(25) | int,
+        "protocol": route.protocol | default('smtp') | lower,
+        "implicitTls": route.implicit_tls | default(false) | bool,
+        "allowInvalidCerts": route.allow_invalid_certs | default(false) | bool,
+        "description": route.description | default(none)
+      } %}
+      {% if route.auth_username is defined %}
+        {% set _ = route_fields.update({"authUsername": route.auth_username}) %}
+      {% endif %}
+      {% if route.auth_secret is defined %}
+        {% set _ = route_fields.update({"authSecret": {"@type": "Value", "secret": route.auth_secret}}) %}
+      {% endif %}
+      {{ {"@type": "upsert", "object": "MtaRoute", "matchOn": ["name"], "value": { "route-" ~ route.name: route_fields }} | to_json }}
+      {% endfor %}
+      {% endif %}
+
+
       {# --- STAGE 1: DNS PROVIDERS (CENTRALIZED UNIQUE INSULATION) --- #}
       {% set active_dns_list = [] %}
       {% for d in stalwart_domains if d.state is defined and d.state == 'present' and d.dns is defined %}
         {% set _ = active_dns_list.append(d.dns | lower) %}
       {% endfor %}
 
-      {# Generate single unified shared provider entry blocks natively #}
       {% set unique_dns = active_dns_list | unique | list %}
       {% for dns in unique_dns %}
       {% set provider_type = stalwart_dns_provider_map[dns] | default('') %}
@@ -270,6 +317,31 @@
         }
       } | to_json }}
       {% endfor %}
+
+      {# --- STAGE 4: SENDER-BASED OUTBOUND ROUTING (STATEFUL CLEANUP) --- #}
+      {% set routing_match_map = {} %}
+      {% set _ = routing_match_map.update({"0": {"if": "is_local_domain(rcpt_domain)", "then": "'local'"}}) %}
+      
+      {# Sicherer und lesbarer Aufbau der aktiven Routen ohne selectattr-Einschränkungen #}
+      {% if sender_domain_routing is defined %}
+        {% set ns = namespace(idx=1) %}
+        {% for rule in sender_domain_routing if rule.state | default("present", true) == 'present' %}
+          {% set _ = routing_match_map.update({ns.idx | string: {"if": "sender_domain == '" ~ rule.domain ~ "'", "then": "'" ~ rule.route ~ "'"}}) %}
+          {% set ns.idx = ns.idx + 1 %}
+        {% endfor %}
+      {% endif %}
+      
+      {{ {
+        "@type": "update",
+        "object": "MtaOutboundStrategy",
+        "id": "singleton",
+        "value": {
+          "route": {
+            "match": routing_match_map,
+            "else": "'mx'"
+          }
+        }
+      } | to_json }}
 
 - name: Inspect unified Stalwart NDJSON deployment plan
   debug:
